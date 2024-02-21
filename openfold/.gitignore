@@ -5,6 +5,4 @@ build
 dist
 
 # files from script downloads
-data
-openfold/resources/
 tests/test_data/
