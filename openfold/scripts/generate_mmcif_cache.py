@@ -1,89 +1,97 @@
-import os
-import json
 import argparse
-from multiprocessing import Pool, cpu_count
+from functools import partial
+import json
+import logging
+from multiprocessing import Pool
+import os
+
+import sys
+sys.path.append(".") # an innocent hack to get this to run from the top level
+
 from tqdm import tqdm
 
-# Assuming aa_codes and parse_pdb functions are defined here (from previous examples)
-aa_codes = {
-    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
-    'GLU': 'E', 'GLN': 'Q', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
-    'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
-    'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
-}
+from openfold.data.mmcif_parsing import parse 
 
-def parse_pdb(pdb_file):
-    data = {
-        "release_date": "1900-01-01",
-        "resolution": None,
-        "chain_ids": [],
-        "seqs": [],
-        "no_chains": 0
-    }
-    pdb_id = os.path.basename(pdb_file).split('.')[0]
 
-    residues = {}
+def parse_file(f, args):
+    try:
+        with open(os.path.join(args.mmcif_dir, f), "r") as fp:
+            mmcif_string = fp.read()
+        file_id = os.path.splitext(f)[0]
+        mmcif = parse(file_id=file_id, mmcif_string=mmcif_string)
+        # print(str(mmcif))
+        if mmcif.mmcif_object is None:
+            logging.info(f"Could not parse {f}. Skipping...")
+            return {}
+        else:
+            mmcif = mmcif.mmcif_object
 
-    with open(pdb_file, 'r') as file:
-        for line in file:
-            if line.startswith("HEADER"):
-                pdb_id = line[62:66].strip().lower()  # Extracting PDB ID
-            elif line.startswith("REMARK   2 RESOLUTION"):
-                try:
-                    data["resolution"] = float(line.split()[3])
-                except ValueError:
-                    pass  # Handle cases where resolution is not a number
-            elif line.startswith("ATOM"):
-                chain_id = line[21]
-                if chain_id not in data["chain_ids"]:
-                    data["chain_ids"].append(chain_id)
-                    data["no_chains"] += 1
-                residue_seq_num = line[22:26].strip()
-                residue_name = line[17:20].strip()
-                residue_id = (chain_id, residue_seq_num)
-                if residue_id not in residues:
-                    residues[residue_id] = aa_codes.get(residue_name, 'X')  # 'X' for unknown residues
+    #     local_data = {}
+    #     if "release_date" not in mmcif.header:
+    #         local_data["release_date"] = "1990-01-01"
+    #     else:
+    #         local_data["release_date"] = mmcif.header["release_date"]
 
-    # Building sequences for each chain
-    for chain_id in data["chain_ids"]:
-        chain_sequence = ''
-        for res_id in sorted([r for r in residues if r[0] == chain_id], key=lambda x: int(x[1])):
-            chain_sequence += residues[res_id]
-        data["seqs"].append(chain_sequence)
+    #     chain_ids, seqs = list(zip(*mmcif.chain_to_seqres.items()))
+    #     local_data["chain_ids"] = chain_ids
+    #     local_data["seqs"] = seqs
+    #     local_data["no_chains"] = len(chain_ids)
 
-    return pdb_id, data
+    #     local_data["resolution"] = mmcif.header["resolution"]
 
-def process_pdb_file(pdb_file_path):
-    pdb_id, pdb_data = parse_pdb(pdb_file_path)
-    return pdb_id, pdb_data
+    #     return {file_id: local_data}
+    # except KeyError as e:
+    #     logging.error(f"KeyError in file {f}: {e}")
+    #     return {}
+        local_data = {}
+        local_data["release_date"] = mmcif.header.get("release_date", "1990-01-01")
+        local_data["resolution"] = mmcif.header.get("resolution", 0.0)
+
+        # Handle chain IDs and sequences, assuming a default if missing
+        chain_ids = ['A']  # Default chain ID
+        seqs = ['Unknown']  # Default sequence
+        if mmcif.chain_to_seqres:
+            chain_ids, seqs = list(zip(*mmcif.chain_to_seqres.items()))
+        local_data["chain_ids"] = chain_ids
+        local_data["seqs"] = seqs
+        local_data["no_chains"] = len(chain_ids)
+
+        return {file_id: local_data}
+    except Exception as e:
+        logging.error(f"Error in file, Skipping...")
+        return {}
 
 def main(args):
-    pdb_file_path = args.pdb_dir
-    output_path = args.output_path
-    no_workers = args.no_workers
-    chunksize = args.chunksize
+    files = [f for f in os.listdir(args.mmcif_dir) if ".cif" in f]
+    fn = partial(parse_file, args=args)
+    data = {}
+    with Pool(processes=args.no_workers) as p:
+        with tqdm(total=len(files)) as pbar:
+            for d in p.imap_unordered(fn, files, chunksize=args.chunksize):
+                data.update(d)
+                pbar.update()
 
-    pdb_files = [os.path.join(pdb_file_path, f) for f in os.listdir(pdb_file_path) if f.endswith('.pdb')]
-    total_files = len(pdb_files)
+    with open(args.output_path, "w") as fp:
+        fp.write(json.dumps(data, indent=4))
 
-    print(f"Processing {total_files} files with {no_workers} workers...")
-
-    with Pool(no_workers) as pool:
-        results = list(tqdm(pool.imap(process_pdb_file, pdb_files, chunksize=chunksize), total=total_files))
-
-    final_data = {pdb_id: data for pdb_id, data in results}
-
-    with open(output_path, "w") as outfile:
-        json.dump(final_data, outfile, indent=4)
-
-    print(f"Data extracted and saved to {output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("pdb_dir", type=str, help="Directory containing PDB or mmCIF files")
-    parser.add_argument("output_path", type=str, help="Path for JSON output")
-    parser.add_argument("--no_workers", type=int, default=cpu_count(), help="Number of workers to use for parsing")
-    parser.add_argument("--chunksize", type=int, default=10, help="How many files should be distributed to each worker at a time")
+    parser.add_argument(
+        "mmcif_dir", type=str, help="Directory containing mmCIF files"
+    )
+    parser.add_argument(
+        "output_path", type=str, help="Path for .json output"
+    )
+    parser.add_argument(
+        "--no_workers", type=int, default=4,
+        help="Number of workers to use for parsing"
+    )
+    parser.add_argument(
+        "--chunksize", type=int, default=10,
+        help="How many files should be distributed to each worker at a time"
+    )
 
     args = parser.parse_args()
+
     main(args)

@@ -13,7 +13,7 @@ python /data_1/home/shenyichong/FusionFold/openfold_preprocess/pdb2cif_3.py $pdb
 
 # 第二步：生成mmcif缓存文件
 echo "Step 2: Generating mmCIF cache..."
-python /data_1/home/shenyichong/FusionFold/openfold/scripts/generate_mmcif_cache.py  $pdb_dir $mmcif_cache_path --no_workers 16
+python /data_1/home/shenyichong/FusionFold/openfold/scripts/generate_mmcif_cache_from_pdb.py  $pdb_dir $mmcif_cache_path --no_workers 16
 
 # 第三步：生成chain数据缓存文件
 echo "Step 3: Generating chain data cache..."
