@@ -65,7 +65,7 @@ def parse_file(
             )
             chain_dict["cluster_size"] = cluster_size
 
-        out = {file_id: chain_dict}
+        out = {file_id+"_A": chain_dict}
 
     return out
 
