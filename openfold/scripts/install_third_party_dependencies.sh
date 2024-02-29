@@ -15,7 +15,7 @@ python setup.py install
 
 echo "Download CUTLASS, required for Deepspeed Evoformer attention kernel"
 # git clone https://github.com/NVIDIA/cutlass --depth 1
-conda env config vars set CUTLASS_PATH=$PWD/cutlass
+conda env config vars set CUTLASS_PATH=$PWD/scripts/cutlass
 
 # This setting is used to fix a worker assignment issue during data loading
 conda env config vars set KMP_AFFINITY=none

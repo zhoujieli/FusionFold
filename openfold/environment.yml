@@ -1,4 +1,4 @@
-name: openfold
+name: openfold_new
 channels:
   - bioconda
   - conda-forge
