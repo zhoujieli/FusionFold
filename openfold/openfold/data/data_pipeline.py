@@ -51,6 +51,7 @@ def make_template_features(
     if(len(hits_cat) == 0 or template_featurizer is None):
         template_features = empty_template_feats(len(input_sequence))
     else:
+        # try:
         templates_result = template_featurizer.get_templates(
             query_sequence=input_sequence,
             query_pdb_code=query_pdb_code,
@@ -63,6 +64,8 @@ def make_template_features(
         # properly. This is a quick fix.
         if(template_features["template_aatype"].shape[0] == 0):
             template_features = empty_template_feats(len(input_sequence))
+        # except Exception as e:
+        #     template_features = empty_template_feats(len(input_sequence))
 
     return template_features
 
