@@ -51,21 +51,21 @@ def make_template_features(
     if(len(hits_cat) == 0 or template_featurizer is None):
         template_features = empty_template_feats(len(input_sequence))
     else:
-        # try:
-        templates_result = template_featurizer.get_templates(
-            query_sequence=input_sequence,
-            query_pdb_code=query_pdb_code,
-            query_release_date=query_release_date,
-            hits=hits_cat,
-        )
-        template_features = templates_result.features
+        try:
+            templates_result = template_featurizer.get_templates(
+                query_sequence=input_sequence,
+                query_pdb_code=query_pdb_code,
+                query_release_date=query_release_date,
+                hits=hits_cat,
+            )
+            template_features = templates_result.features
 
-        # The template featurizer doesn't format empty template features
-        # properly. This is a quick fix.
-        if(template_features["template_aatype"].shape[0] == 0):
+            # The template featurizer doesn't format empty template features
+            # properly. This is a quick fix.
+            if(template_features["template_aatype"].shape[0] == 0):
+                template_features = empty_template_feats(len(input_sequence))
+        except Exception as e:
             template_features = empty_template_feats(len(input_sequence))
-        # except Exception as e:
-        #     template_features = empty_template_feats(len(input_sequence))
 
     return template_features
 

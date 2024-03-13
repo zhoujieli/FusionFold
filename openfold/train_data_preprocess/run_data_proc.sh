@@ -9,7 +9,7 @@ chain_data_cache_path="./chain_data_cache.json" # 输出：chain数据缓存文�
 
 # 第一步：转换pdb到mmcif
 echo "Step 1: Converting PDB to mmCIF..."
-python /data_1/home/shenyichong/FusionFold/openfold_preprocess/pdb2cif_3.py $pdb_dir $mmcif_dir --no_workers 16
+python /home/shenyichong/FusionFold/openfold_preprocess/pdb2cif_3.py $pdb_dir $mmcif_dir --no_workers 16
 
 # 第二步：生成mmcif缓存文件
 echo "Step 2: Generating mmCIF cache..."
