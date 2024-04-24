@@ -313,7 +313,8 @@ def main(args):
 
     if(args.early_stopping):
         es = EarlyStoppingVerbose(
-            monitor="val/lddt_ca",
+            # monitor="val/lddt_ca",
+            monitor="train/lddt_ca",
             min_delta=args.min_delta,
             patience=args.patience,
             verbose=False,

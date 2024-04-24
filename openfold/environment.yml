@@ -3,6 +3,7 @@ channels:
   - bioconda
   - conda-forge
   - pytorch
+  - nvidia
 dependencies:
   - python=3.9
   - libgcc=7.2
@@ -10,7 +11,8 @@ dependencies:
   - pip
   - openmm=7.7
   - pdbfixer
-  - cudatoolkit==11.3.*
+  # - cudatoolkit==11.3.*
+  - cudatoolkit==11.7
   - pytorch-lightning==1.5.10
   - biopython==1.79
   - numpy==1.21
@@ -28,7 +30,10 @@ dependencies:
   - bioconda::hmmer==3.3.2
   - bioconda::hhsuite==3.3.0
   - bioconda::kalign2==2.04
-  - pytorch::pytorch=1.12.*
+  # - pytorch::pytorch=1.12.*
+  - pytorch::pytorch==1.13.0
+  - pytorch::torchvision==0.14.0
+  - pytorch::torchaudio==0.13.0
   - pip:
       - deepspeed==0.12.4
       - dm-tree==0.1.6
