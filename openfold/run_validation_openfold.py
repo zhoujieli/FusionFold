@@ -37,6 +37,8 @@ from openfold.utils.trace_utils import (
 from scripts.utils import add_data_args
 from openfold.utils.loss import AlphaFoldLoss
 from tqdm import tqdm
+import torch.multiprocessing as mp
+from multiprocessing import Manager
 
 
 TRACING_INTERVAL = 50
@@ -71,9 +73,10 @@ def precompute_alignments(tags, seqs, alignment_dir, args):
                 tmp_fasta_path, local_alignment_dir
             )
         else:
-            logger.info(
-                f"Using precomputed alignments for {tag} at {alignment_dir}..."
-            )
+            # logger.info(
+            #     f"Using precomputed alignments for {tag} at {alignment_dir}..."
+            # )
+            pass
 
         # Remove temporary FASTA file
         os.remove(tmp_fasta_path)
@@ -181,6 +184,13 @@ def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor
                 # loss = loss_func(out, processed_feature_dict)
     return infer_result
 
+ # 定义worker
+def worker(model, device, subset, alignment_dir, data_processor,feature_processor,feature_dicts, args, results_queue, progress_queue):
+    # 这里应该是调用您的模型推理函数
+    result = infer_seqences(model, device, subset, alignment_dir, data_processor, feature_processor, feature_dicts, args)
+    results_queue.put(result)
+    progress_queue.put(1)
+
 def main(args):
     # Create the output directory
     os.makedirs(args.output_dir, exist_ok=True)
@@ -245,16 +255,15 @@ def main(args):
             config, model_devices[i], args.openfold_checkpoint_path, args.jax_param_path, args.output_dir
         ))
 
+    # 加入multi-process progress bar
+    manager = Manager()
+    progress_queue = manager.Queue()
+
     # 将即将推理的数据按照GPU数量进行分组
     grouped_sequences = np.array_split(sorted_targets, num_gpus)
-
-    # 定义worker
-    def worker(model, device, subset, alignmennt_dir, data_processor,feature_processor,feature_dicts, args,results_queue):
-        # 这里应该是调用您的模型推理函数
-        result = infer_seqences(model, device, subset, alignment_dir, data_processor, feature_processor, feature_dicts, args)
-        results_queue.put(result)
-
-    import torch.multiprocessing as mp
+    
+    # 加入multi-process progress bar: set total number of tasks
+    total_tasks = sum(len(subset) for subset in grouped_sequences)
     processes = []
     results_queue = mp.Queue()
 
@@ -262,9 +271,17 @@ def main(args):
     for i, subset in enumerate(grouped_sequences):
         device = f'cuda:{i}' if torch.cuda.is_available() else 'cpu'
         for model, output_directory in model_generator[i]:
-            p = mp.Process(target=worker, args=(model, device, subset, alignment_dir, data_processor, feature_processor,feature_dicts, args, results_queue))
+            p = mp.Process(target=worker, args=(model, device, subset, alignment_dir, data_processor, feature_processor,feature_dicts, args, results_queue, progress_queue))
             p.start()
             processes.append(p)
+
+    # Progress bar monitoring
+    pbar = tqdm(total=total_tasks, desc="Processing Sequences")
+    while any(p.is_alive() for p in processes):
+        while not progress_queue.empty():
+            progress_queue.get()
+            pbar.update(1)
+    pbar.close()
 
     # 保存结果
     # 引入infer_result用于保存推理结果，包括tag, tags, seqs, plddt的值
@@ -284,6 +301,7 @@ def main(args):
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True) 
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "fasta_dir", type=str,
