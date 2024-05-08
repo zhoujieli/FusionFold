@@ -3,6 +3,7 @@ import logging
 import math
 import numpy as np
 import os
+import pandas as pd
 
 from openfold.utils.script_utils import load_models_from_command_line, parse_fasta, run_model, prep_output, \
     update_timings, relax_protein
@@ -119,7 +120,7 @@ def generate_feature_dict(
     return feature_dict
 
 
-def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor, feature_processor, feature_dicts, args):
+def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor, feature_processor, feature_dicts, args, progress_queue):
     cur_tracing_interval = 0
     infer_result = []
     for (tag, tags), seqs in sequences:
@@ -140,13 +141,6 @@ def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor
                 args,
             )
 
-            if(args.trace_model):
-                n = feature_dict["aatype"].shape[-2]
-                rounded_seqlen = round_up_seqlen(n)
-                feature_dict = pad_feature_dict_seq(
-                    feature_dict, rounded_seqlen,
-                )
-
             feature_dicts[tag] = feature_dict
 
         processed_feature_dict = feature_processor.process_features(
@@ -159,19 +153,6 @@ def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor
             for k,v in processed_feature_dict.items()
         }
 
-        if(args.trace_model):
-            if(rounded_seqlen > cur_tracing_interval):
-                logger.info(
-                    f"Tracing model at {rounded_seqlen} residues..."
-                )
-                t = time.perf_counter()
-                trace_model_(model, processed_feature_dict)
-                tracing_time = time.perf_counter() - t
-                logger.info(
-                    f"Tracing time: {tracing_time}"
-                )
-                cur_tracing_interval = rounded_seqlen
-
         out = run_model(infer_model, processed_feature_dict, tag, args.output_dir)
         for k,v in out.items():
             if k == "plddt":
@@ -182,14 +163,16 @@ def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor
                 infer_result.append((tag, tags, seqs, plddt_mean))
             # # 计算loss
                 # loss = loss_func(out, processed_feature_dict)
+        # update progress bar
+        progress_queue.put(1)
+
     return infer_result
 
  # 定义worker
 def worker(model, device, subset, alignment_dir, data_processor,feature_processor,feature_dicts, args, results_queue, progress_queue):
     # 这里应该是调用您的模型推理函数
-    result = infer_seqences(model, device, subset, alignment_dir, data_processor, feature_processor, feature_dicts, args)
+    result = infer_seqences(model, device, subset, alignment_dir, data_processor, feature_processor, feature_dicts, args, progress_queue)
     results_queue.put(result)
-    progress_queue.put(1)
 
 def main(args):
     # Create the output directory
@@ -228,19 +211,26 @@ def main(args):
     else:
         alignment_dir = args.use_precomputed_alignments
 
+    validation_num = 16
     tag_list = []
     seq_list = []
+    cnt = 0
     for fasta_file in list_files_with_extensions(args.fasta_dir, (".fasta", ".fa")):
-        # Gather input sequences
-        with open(os.path.join(args.fasta_dir, fasta_file), "r") as fp:
-            data = fp.read()
+        if cnt < validation_num:
+            
+            # Gather input sequences
+            with open(os.path.join(args.fasta_dir, fasta_file), "r") as fp:
+                data = fp.read()
 
-        tags, seqs = parse_fasta(data)
-        # assert len(tags) == len(set(tags)), "All FASTA tags must be unique"
-        tag = '-'.join(tags)
+            tags, seqs = parse_fasta(data)
+            # assert len(tags) == len(set(tags)), "All FASTA tags must be unique"
+            tag = '-'.join(tags)
 
-        tag_list.append((tag, tags))
-        seq_list.append(seqs)
+            tag_list.append((tag, tags))
+            seq_list.append(seqs)
+            cnt += 1
+        else:
+            break
 
     seq_sort_fn = lambda target: sum([len(s) for s in target[1]])
     sorted_targets = sorted(zip(tag_list, seq_list), key=seq_sort_fn)
@@ -296,7 +286,7 @@ def main(args):
     # 将infer_result写入csv文件中，并删选所有plddt小于50的序列写入另外一个csv文件中
     infer_result = pd.DataFrame(combined_results, columns=["tag", "tags", "seqs", "plddt"])
     infer_result.to_csv("infer_result.csv", index=False)
-    infer_result = infer_result[combined_results["plddt"] < 50]
+    infer_result = infer_result[infer_result["plddt"] < 50]
     infer_result.to_csv("infer_result_plddt_less_than_50.csv", index=False)
 
 
@@ -368,12 +358,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multimer_ri_gap", type=int, default=200,
         help="""Residue index offset between multiple sequences, if provided"""
-    )
-    parser.add_argument(
-        "--trace_model", action="store_true", default=False,
-        help="""Whether to convert parts of each model to TorchScript.
-                Significantly improves runtime at the cost of lengthy
-                'compilation.' Useful for large batch jobs."""
     )
     parser.add_argument(
         "--subtract_plddt", action="store_true", default=False,
