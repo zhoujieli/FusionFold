@@ -122,7 +122,6 @@ def generate_feature_dict(
 
 def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor, feature_processor, feature_dicts, args, progress_queue):
     cur_tracing_interval = 0
-    infer_result = []
     for (tag, tags), seqs in sequences:
         output_name = f'{tag}_{args.config_preset}'
         if args.output_postfix is not None:
@@ -154,25 +153,29 @@ def infer_seqences(infer_model, device, sequences, alignment_dir, data_processor
         }
 
         out = run_model(infer_model, processed_feature_dict, tag, args.output_dir)
+        infer_result = []
         for k,v in out.items():
             if k == "plddt":
                 # 计算plddt的均值
                 plddt_mean = torch.mean(v)
                 # 将tensor值转换为数值
                 plddt_mean = plddt_mean.item()
-                infer_result.append((tag, tags, seqs, plddt_mean))
+                # 将infer_result写入文件
+                infer_result.append((seqs, plddt_mean))
+                result_df = pd.DataFrame(infer_result, columns=["seqs", "plddt"])
+                result_df.to_csv(args.output_dir+"/"+str(tag)+".csv", index=False)
             # # 计算loss
                 # loss = loss_func(out, processed_feature_dict)
         # update progress bar
         progress_queue.put(1)
 
-    return infer_result
+    return 
 
  # 定义worker
-def worker(model, device, subset, alignment_dir, data_processor,feature_processor,feature_dicts, args, results_queue, progress_queue):
+def worker(model, device, subset, alignment_dir, data_processor,feature_processor,feature_dicts, args, progress_queue):
     # 这里应该是调用您的模型推理函数
-    result = infer_seqences(model, device, subset, alignment_dir, data_processor, feature_processor, feature_dicts, args, progress_queue)
-    results_queue.put(result)
+    infer_seqences(model, device, subset, alignment_dir, data_processor, feature_processor, feature_dicts, args, progress_queue)
+    return 
 
 def main(args):
     # Create the output directory
@@ -211,7 +214,7 @@ def main(args):
     else:
         alignment_dir = args.use_precomputed_alignments
 
-    validation_num = 16
+    validation_num = 1024
     tag_list = []
     seq_list = []
     cnt = 0
@@ -255,13 +258,12 @@ def main(args):
     # 加入multi-process progress bar: set total number of tasks
     total_tasks = sum(len(subset) for subset in grouped_sequences)
     processes = []
-    results_queue = mp.Queue()
 
     # 多进程
     for i, subset in enumerate(grouped_sequences):
         device = f'cuda:{i}' if torch.cuda.is_available() else 'cpu'
         for model, output_directory in model_generator[i]:
-            p = mp.Process(target=worker, args=(model, device, subset, alignment_dir, data_processor, feature_processor,feature_dicts, args, results_queue, progress_queue))
+            p = mp.Process(target=worker, args=(model, device, subset, alignment_dir, data_processor, feature_processor,feature_dicts, args, progress_queue))
             p.start()
             processes.append(p)
 
@@ -273,21 +275,9 @@ def main(args):
             pbar.update(1)
     pbar.close()
 
-    # 保存结果
-    # 引入infer_result用于保存推理结果，包括tag, tags, seqs, plddt的值
-    infer_result = []
-
     for p in processes:
         p.join()
-        infer_result.append(results_queue.get())
-
-    combined_results = [item for sublist in infer_result for item in sublist]
-    
-    # 将infer_result写入csv文件中，并删选所有plddt小于50的序列写入另外一个csv文件中
-    infer_result = pd.DataFrame(combined_results, columns=["tag", "tags", "seqs", "plddt"])
-    infer_result.to_csv("infer_result.csv", index=False)
-    infer_result = infer_result[infer_result["plddt"] < 50]
-    infer_result.to_csv("infer_result_plddt_less_than_50.csv", index=False)
+        print("Process finished")
 
 
 if __name__ == "__main__":
